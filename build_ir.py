@@ -2,8 +2,9 @@
 """Build injured-reserve week lists for older seasons from nflverse weekly rosters.
 
 Writes data/hist/<Y>.ir.json for each season Y (2002 onward):
-  {"season": Y, "ir": {"<gsis_id>": [week, week, ...]}}
-A week is listed when the player's weekly roster status is RES (reserve/injured).
+  {"season": Y, "ir": {"<gsis_id>": [week, ...]}, "back": {"<gsis_id>": [week, ...]}}
+"ir" lists the weeks a player's weekly roster status is RES (reserve/injured).
+"back" lists the weeks he returned to ACT right after being RES (activated).
 Players are keyed by gsis_id (the app maps a Sleeper player to it).
 
 Source: nflverse-data release "weekly_rosters" (roster_weekly_<year>.csv).
@@ -33,10 +34,9 @@ def main():
         except Exception as e:
             print(y, "skipped:", e); continue
         ir = {}
+        stat = {}
         for r in csv.DictReader(io.StringIO(raw)):
             if r.get("position") not in POS or r.get("game_type") not in ("REG", "CON", ""):
-                continue
-            if r.get("status") != "RES":
                 continue
             sid = r.get("gsis_id")
             if not sid:
@@ -45,8 +45,17 @@ def main():
                 wk = int(r["week"])
             except Exception:
                 continue
-            ir.setdefault(str(sid), set()).add(wk)
-        out = {"season": y, "ir": {k: sorted(v) for k, v in sorted(ir.items())}}
+            stat.setdefault(str(sid), {})[wk] = r.get("status")
+        back = {}
+        for sid, wks in stat.items():
+            order = sorted(wks)
+            for i, wk in enumerate(order):
+                if wks[wk] == "RES":
+                    ir.setdefault(sid, set()).add(wk)
+                    if i + 1 < len(order) and wks[order[i + 1]] == "ACT":
+                        back.setdefault(sid, set()).add(order[i + 1])
+        out = {"season": y, "ir": {k: sorted(v) for k, v in sorted(ir.items())},
+               "back": {k: sorted(v) for k, v in sorted(back.items())}}
         json.dump(out, open(os.path.join(OUT, "%d.ir.json" % y), "w"), separators=(",", ":"))
         print(y, len(ir), "players")
 
