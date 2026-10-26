@@ -383,6 +383,8 @@ def process_year(year):
             (num(rows_by_week[w].get("attempts")) or 0)
             + (num(rows_by_week[w].get("carries")) or 0)
             + (num(rows_by_week[w].get("targets")) or 0)
+            # 2003-2008 have no targets in nflverse, so receptions count too
+            + (num(rows_by_week[w].get("receptions")) or 0)
             for w in weeks
         )
         if usage == 0:
