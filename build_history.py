@@ -23,6 +23,7 @@ Stdlib only, no third-party dependencies.
 """
 
 import csv
+import gzip
 import io
 import json
 import os
@@ -160,6 +161,60 @@ def download_snap_counts(year):
     rows = fetch_csv_rows(url) or []
     log(f"  -> {len(rows)} rows")
     return rows
+
+
+def download_pbp_targets(year):
+    """(gsis_id, week) -> [targets, air_yards] from nflverse play-by-play:
+    regular-season pass attempts thrown to a receiver (no sacks, no 2-point
+    tries), the same rule the dynasty-tool ratings use. Streamed, not saved."""
+    url = f"{RELEASE_BASE}/pbp/play_by_play_{year}.csv.gz"
+    log(f"Downloading {url}")
+    req = urllib.request.Request(url, headers={"User-Agent": "fantasy-data-history-builder"})
+    out = defaultdict(lambda: [0, 0])
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        text = io.TextIOWrapper(gzip.GzipFile(fileobj=resp), encoding="utf-8")
+        for row in csv.DictReader(text):
+            if row.get("season_type") != "REG" or not row.get("posteam") or num(row.get("two_point_attempt")) == 1:
+                continue
+            if num(row.get("pass_attempt")) != 1 or num(row.get("sack")) == 1:
+                continue
+            gsis_id, week = row.get("receiver_id") or row.get("receiver_player_id"), num(row.get("week"))
+            if not gsis_id or week is None:
+                continue
+            entry = out[(gsis_id, week)]
+            entry[0] += 1
+            entry[1] += num(row.get("air_yards")) or 0
+    log(f"  -> {len(out)} player-weeks with targets")
+    return out
+
+
+def fill_targets(year, stats_rows):
+    """2003-2008: the weekly stats files have no targets (and no air yards
+    before 2006), so take them from play-by-play for those seasons only."""
+    # Covered = most player-weeks with a catch also have the stat (a few
+    # stray values, like 2003's 3 players with targets, don't count).
+    rows = [r for r in stats_rows if r.get("season_type") == "REG"]
+    caught = [r for r in rows if (num(r.get("receptions")) or 0) > 0]
+    has_tgt = sum(1 for r in caught if num(r.get("targets"))) >= 0.9 * len(caught)
+    has_ay = sum(1 for r in caught if num(r.get("receiving_air_yards"))) >= 0.5 * len(caught)
+    if has_tgt and has_ay:
+        return
+    pbp = download_pbp_targets(year)
+    pbp_ay = any(v[1] for v in pbp.values())  # play-by-play air yards start in 2006
+    for r in rows:
+        tgt, ay = pbp.get((r.get("player_id"), num(r.get("week"))), (0, 0))
+        if not has_tgt:
+            r["targets"] = tgt
+        if not has_ay and pbp_ay:
+            r["receiving_air_yards"] = ay
+
+
+def check_targets(year, season_players):
+    """Fail if a season has receivers but (almost) no targets, as 2003-2008 did."""
+    rec = sum(1 for p in season_players if p["s"].get("rec", 0) > 0)
+    tgt = sum(1 for p in season_players if p["s"].get("rec_tgt", 0) > 0)
+    if rec >= 100 and tgt < 0.9 * rec:
+        sys.exit(f"Season {year}: {rec} players with receptions but only {tgt} with targets; files not written")
 
 
 def num(value):
@@ -365,6 +420,7 @@ def process_year(year):
     stats_rows = download_stats(year)
     if not stats_rows:
         return None
+    fill_targets(year, stats_rows)
 
     roster_rows = download_roster(year)
     roster_lookup, pfr_to_gsis = build_roster_lookup(roster_rows)
@@ -383,7 +439,7 @@ def process_year(year):
             (num(rows_by_week[w].get("attempts")) or 0)
             + (num(rows_by_week[w].get("carries")) or 0)
             + (num(rows_by_week[w].get("targets")) or 0)
-            # 2003-2008 have no targets in nflverse, so receptions count too
+            # receptions count too, in case a season's targets are missing
             + (num(rows_by_week[w].get("receptions")) or 0)
             for w in weeks
         )
@@ -422,6 +478,7 @@ def process_year(year):
             player_weeks[str(week)] = {"s": ws, "n": wn}
         week_entries[gsis_id] = player_weeks
 
+    check_targets(year, season_players)
     os.makedirs(OUT_DIR, exist_ok=True)
     season_path = os.path.join(OUT_DIR, f"{year}.json")
     with open(season_path, "w", encoding="utf-8") as f:
