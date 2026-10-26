@@ -143,7 +143,8 @@ def load_id_maps():
     players = json.loads(raw)
     added = 0
     for sleeper_id, p in players.items():
-        gsis_id = p.get("gsis_id")
+        # Sleeper pads some gsis ids with a leading space (2019 class)
+        gsis_id = (p.get("gsis_id") or "").strip()
         if gsis_id and gsis_id not in gsis_map:
             gsis_map[gsis_id] = sleeper_id
             added += 1
