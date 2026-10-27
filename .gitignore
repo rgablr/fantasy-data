@@ -1,0 +1,2 @@
+# Raw injury reports: never push (derived inputs for the private ratings build only)
+data/hist/*.inj.json
