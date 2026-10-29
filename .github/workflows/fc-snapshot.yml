@@ -1,0 +1,42 @@
+name: FantasyCalc daily snapshot
+
+on:
+  schedule:
+    # Once a day, 11:00 UTC (6 AM Central).
+    - cron: "0 11 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fc-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Save today's FantasyCalc values
+        run: python3 scripts/fc_snapshot.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/fc/
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "FantasyCalc snapshot $(date -u +'%Y-%m-%d')"
+            git pull --rebase
+            git push
+          fi
