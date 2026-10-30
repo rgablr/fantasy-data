@@ -9,7 +9,8 @@ formats (12 teams, full PPR):
     red_sf   redraft superflex      red_1qb  redraft 1QB
 
 Files (FantasyCalc's raw numbers; the app shows them divided by 1000):
-    data/fc/<format>/<YYYY-MM>.json   {"format", "month", "p": {sleeper_id: [value for day 1, day 2, ...]}}
+    data/fc/<format>/<YYYY-MM>.json   {"format", "month", "p": {key: [value for day 1, day 2, ...]}}
+                                      (key: Sleeper id, or "pick:<FantasyCalc pick name>" for rookie picks)
                                       (null where there is no value that day)
     data/fc/index.json                {"formats": {format: ["YYYY-MM", ...]}, "updated": "YYYY-MM-DD"}
 
@@ -54,13 +55,19 @@ def qs(dyn, qbs):
 
 
 def current(dyn, qbs):
-    """Today's values: {sleeper_id: (value, fantasycalc_id)}."""
+    """Today's values: {key: (value, fantasycalc_id)}. Players are keyed by Sleeper id, rookie picks by
+    "pick:" + FantasyCalc's row name in lower case (e.g. "pick:2027 1st (early)"; dynasty only)."""
     out = {}
     for x in get(f"{API}/values/current?{qs(dyn, qbs)}"):
         p = x.get("player") or {}
-        sid, fid, v = p.get("sleeperId"), p.get("id"), x.get("value")
-        if sid and fid is not None and v is not None and p.get("position") != "PICK":
-            out[str(sid)] = (int(v), fid)
+        fid, v = p.get("id"), x.get("value")
+        if fid is None or v is None:
+            continue
+        if p.get("position") == "PICK":
+            if p.get("name"):
+                out["pick:" + str(p["name"]).strip().lower()] = (int(v), fid)
+        elif p.get("sleeperId"):
+            out[str(p["sleeperId"])] = (int(v), fid)
     return out
 
 
